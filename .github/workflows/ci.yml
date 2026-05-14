@@ -52,6 +52,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+      # macOS-latest runners ship a `rustup-init` proxy that the
+      # PATH picks up before the freshly-installed toolchain on
+      # some runner snapshots — `cargo test` resolves to the
+      # bootstrapper and fails with "unexpected argument 'test'".
+      # Forcing the toolchain default + sanity-checking with
+      # `cargo --version` makes the failure show up at this step
+      # with a clear error instead of mid-test, and on healthy
+      # snapshots is a no-op.
+      - name: Pin toolchain default (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          rustup default ${{ matrix.rust }}
+          cargo --version
+          rustc --version
+      - name: Pin toolchain default (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          rustup default ${{ matrix.rust }}
+          cargo --version
+          rustc --version
+        shell: pwsh
       - uses: Swatinem/rust-cache@v2
       - name: cargo test --lib
         run: cargo test --lib --all-features
