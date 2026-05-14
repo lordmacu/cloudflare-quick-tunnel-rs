@@ -56,7 +56,8 @@ use crate::tunnelrpc_capnp;
 /// Sentinel error string the edge returns when the same connection
 /// index is already registered for this tunnel. Worth distinguishing
 /// because retrying the same conn-index would just race.
-pub const DUPLICATE_CONNECTION_ERROR: &str = "edge already has connection registered for the given connection identifier";
+pub const DUPLICATE_CONNECTION_ERROR: &str =
+    "edge already has connection registered for the given connection identifier";
 
 /// Default request budget for `register_connection`.
 pub const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(15);
@@ -190,9 +191,10 @@ pub async fn register_connection(
     options: &ConnectionOptions,
 ) -> Result<(RegistrationDetails, ControlSession), TunnelError> {
     debug!(%tunnel_id, conn_index, "opening control stream");
-    let (send, recv) = conn.open_bi().await.map_err(|e| {
-        TunnelError::Register(format!("open_bi on control stream: {e}"))
-    })?;
+    let (send, recv) = conn
+        .open_bi()
+        .await
+        .map_err(|e| TunnelError::Register(format!("open_bi on control stream: {e}")))?;
     // capnp-rpc's `RpcSystem` is `!Send` (internal Rc<RefCell<_>>),
     // so we can't drive it from a tokio task. Spawn a dedicated OS
     // thread with its own current-thread tokio runtime + LocalSet
@@ -240,26 +242,31 @@ pub async fn register_connection(
                     rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
                 // Build + dispatch the register call.
-                let request =
-                    match build_register_request(&server, &auth_owned, tunnel_id, conn_index, &options_owned) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let _ = done_tx.send(Err(e));
-                            return;
-                        }
-                    };
+                let request = match build_register_request(
+                    &server,
+                    &auth_owned,
+                    tunnel_id,
+                    conn_index,
+                    &options_owned,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = done_tx.send(Err(e));
+                        return;
+                    }
+                };
                 let response_promise = request.send().promise;
 
                 let call = async {
                     let reply = response_promise.await.map_err(|e| {
                         TunnelError::Register(format!("register_connection RPC: {e}"))
                     })?;
-                    let response_reader = reply.get().map_err(|e| {
-                        TunnelError::Register(format!("response root: {e}"))
-                    })?;
-                    let result = response_reader.get_result().map_err(|e| {
-                        TunnelError::Register(format!("response.result: {e}"))
-                    })?;
+                    let response_reader = reply
+                        .get()
+                        .map_err(|e| TunnelError::Register(format!("response root: {e}")))?;
+                    let result = response_reader
+                        .get_result()
+                        .map_err(|e| TunnelError::Register(format!("response.result: {e}")))?;
                     decode_connection_response(result)
                 };
 
@@ -409,9 +416,8 @@ fn decode_connection_response(
             Err(TunnelError::Register(cause))
         }
         WhichReader::ConnectionDetails(details_reader) => {
-            let d = details_reader.map_err(|e| {
-                TunnelError::Register(format!("ConnectionDetails reader: {e}"))
-            })?;
+            let d = details_reader
+                .map_err(|e| TunnelError::Register(format!("ConnectionDetails reader: {e}")))?;
             let uuid_bytes = d
                 .get_uuid()
                 .map_err(|e| TunnelError::Register(format!("ConnectionDetails.uuid: {e}")))?;

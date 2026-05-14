@@ -51,7 +51,11 @@ async fn spawn_hello_server() -> u16 {
                     .and_then(|s| s.lines().next())
                     .unwrap_or("GET /unknown")
                     .to_string();
-                let path = first_line.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let path = first_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .to_string();
                 let body = format!("hello {path}");
                 let head = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -98,7 +102,13 @@ async fn live_end_to_end_http_through_tunnel() {
     let host = handle.url.trim_start_matches("https://").to_string();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .resolve(&host, std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(104, 16, 230, 132)), 443))
+        .resolve(
+            &host,
+            std::net::SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(104, 16, 230, 132)),
+                443,
+            ),
+        )
         .build()
         .unwrap();
     let probe_url = format!("{}/probe", handle.url);
@@ -138,7 +148,10 @@ async fn live_end_to_end_http_through_tunnel() {
         metrics.streams_total, metrics.bytes_in, metrics.bytes_out
     );
     assert!(metrics.streams_total >= 1, "expected ≥1 stream");
-    assert!(metrics.bytes_out > 0, "expected non-zero bytes_out (response body)");
+    assert!(
+        metrics.bytes_out > 0,
+        "expected non-zero bytes_out (response body)"
+    );
 
     handle.shutdown().await.expect("shutdown");
 }

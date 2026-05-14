@@ -22,10 +22,7 @@ pub enum TunnelError {
     ApiBusiness(Vec<QuickTunnelApiError>),
 
     #[error("quick-tunnel API responded non-JSON ({status}): {body_snippet}")]
-    ApiNonJson {
-        status: u16,
-        body_snippet: String,
-    },
+    ApiNonJson { status: u16, body_snippet: String },
 
     #[error("edge discovery failed: {0}")]
     Discovery(String),

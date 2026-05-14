@@ -16,11 +16,23 @@
 // paths between schemas (e.g. `tunnelrpc` references `metadata`
 // from `quic_metadata_protocol`). Hoisting them keeps the
 // generator output usable verbatim.
-#[allow(clippy::all, unused, non_camel_case_types, non_upper_case_globals, non_snake_case)]
+#[allow(
+    clippy::all,
+    unused,
+    non_camel_case_types,
+    non_upper_case_globals,
+    non_snake_case
+)]
 pub mod tunnelrpc_capnp {
     include!(concat!(env!("OUT_DIR"), "/tunnelrpc_capnp.rs"));
 }
-#[allow(clippy::all, unused, non_camel_case_types, non_upper_case_globals, non_snake_case)]
+#[allow(
+    clippy::all,
+    unused,
+    non_camel_case_types,
+    non_upper_case_globals,
+    non_snake_case
+)]
 pub mod quic_metadata_protocol_capnp {
     include!(concat!(env!("OUT_DIR"), "/quic_metadata_protocol_capnp.rs"));
 }

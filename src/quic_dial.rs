@@ -10,7 +10,7 @@
 //! Public surface:
 //!   - [`dial`]      — one shot against a single `EdgeAddr`.
 //!   - [`dial_any`]  — try a slice of edges in order, return on
-//!                     the first success or the last error.
+//!     the first success or the last error.
 
 use std::net::SocketAddr;
 use std::sync::Arc;

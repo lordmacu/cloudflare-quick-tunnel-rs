@@ -238,11 +238,7 @@ fn extract_path(dest: &str) -> String {
     "/".into()
 }
 
-async fn write_error_response<W>(
-    writer: &mut W,
-    status: u16,
-    msg: &str,
-) -> Result<(), TunnelError>
+async fn write_error_response<W>(writer: &mut W, status: u16, msg: &str) -> Result<(), TunnelError>
 where
     W: futures::io::AsyncWrite + Unpin,
 {
@@ -281,9 +277,9 @@ async fn read_http_response_head(
             .map_err(|e| TunnelError::Internal(format!("httparse: {e}")))?
         {
             httparse::Status::Complete(consumed) => {
-                let status = resp.code.ok_or_else(|| {
-                    TunnelError::Internal("response had no status code".into())
-                })?;
+                let status = resp
+                    .code
+                    .ok_or_else(|| TunnelError::Internal("response had no status code".into()))?;
                 let pairs = resp
                     .headers
                     .iter()
@@ -389,7 +385,10 @@ mod tests {
 
     #[test]
     fn extract_path_strips_scheme() {
-        assert_eq!(extract_path("https://abc.trycloudflare.com/path?q=1"), "/path?q=1");
+        assert_eq!(
+            extract_path("https://abc.trycloudflare.com/path?q=1"),
+            "/path?q=1"
+        );
         assert_eq!(extract_path("https://abc.trycloudflare.com"), "/");
         assert_eq!(extract_path("/relative/x"), "/relative/x");
     }

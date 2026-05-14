@@ -133,9 +133,8 @@ async fn try_once(client: &reqwest::Client, url: &str) -> Result<QuickTunnel, Tu
         });
     }
 
-    let envelope: QuickTunnelResponse = serde_json::from_slice(&body).map_err(|e| {
-        TunnelError::Internal(format!("malformed JSON from /tunnel: {e}"))
-    })?;
+    let envelope: QuickTunnelResponse = serde_json::from_slice(&body)
+        .map_err(|e| TunnelError::Internal(format!("malformed JSON from /tunnel: {e}")))?;
 
     if !envelope.success {
         return Err(TunnelError::ApiBusiness(envelope.errors));
@@ -251,7 +250,8 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/tunnel"))
             .respond_with(
-                ResponseTemplate::new(429).set_body_string("<html><body>rate limited</body></html>"),
+                ResponseTemplate::new(429)
+                    .set_body_string("<html><body>rate limited</body></html>"),
             )
             .expect(1)
             .mount(&server)

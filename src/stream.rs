@@ -180,8 +180,7 @@ where
 
     let mut message = ::capnp::message::Builder::new_default();
     {
-        let mut root: quic_metadata_protocol_capnp::connect_response::Builder =
-            message.init_root();
+        let mut root: quic_metadata_protocol_capnp::connect_response::Builder = message.init_root();
         root.set_error(error);
         let mut meta = root.init_metadata(metadata.len() as u32);
         for (i, (k, v)) in metadata.iter().enumerate() {
@@ -221,9 +220,16 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         {
             let mut cursor = Cursor::new(&mut buf);
-            write_connect_response(&mut cursor, "", &[("HttpStatus", "200"), ("HttpHeader:Content-Type", "text/plain")])
-                .await
-                .unwrap();
+            write_connect_response(
+                &mut cursor,
+                "",
+                &[
+                    ("HttpStatus", "200"),
+                    ("HttpHeader:Content-Type", "text/plain"),
+                ],
+            )
+            .await
+            .unwrap();
         }
         // Sanity: starts with signature + version + at least 8 capnp bytes.
         assert_eq!(&buf[0..6], &DATA_STREAM_SIGNATURE);

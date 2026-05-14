@@ -51,7 +51,10 @@ async fn live_full_register_flow() {
         "registered uuid={} location={} remote_managed={}",
         details.uuid, details.location, details.tunnel_is_remotely_managed
     );
-    assert!(!details.location.is_empty(), "edge should return a colo code");
+    assert!(
+        !details.location.is_empty(),
+        "edge should return a colo code"
+    );
 
     // Tear down cleanly so we don't hold the registration past the test.
     conn.close(0u32.into(), b"test-done");

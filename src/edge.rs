@@ -68,12 +68,12 @@ impl EdgeAddr {
     }
 
     fn matches(&self, filter: IpVersionFilter) -> bool {
-        match (filter, self.version) {
-            (IpVersionFilter::Auto, _) => true,
-            (IpVersionFilter::V4Only, EdgeIpVersion::V4) => true,
-            (IpVersionFilter::V6Only, EdgeIpVersion::V6) => true,
-            _ => false,
-        }
+        matches!(
+            (filter, self.version),
+            (IpVersionFilter::Auto, _)
+                | (IpVersionFilter::V4Only, EdgeIpVersion::V4)
+                | (IpVersionFilter::V6Only, EdgeIpVersion::V6)
+        )
     }
 }
 

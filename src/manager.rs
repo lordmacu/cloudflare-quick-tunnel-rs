@@ -4,8 +4,7 @@
 //!   2. Edge discovery               → `edge::discover`
 //!   3. QUIC dial + register         → `connect_cycle` (helper)
 //!   4. Spawn reactor task           → owns the QUIC connection,
-//!                                      runs the supervisor, and
-//!                                      reconnects on edge drop.
+//!      runs the supervisor, and reconnects on edge drop.
 //!   5. Return handle holding `url` + shutdown channel.
 //!
 //! The reactor task is the long-lived owner: it cycles between

@@ -74,12 +74,7 @@ async fn main() -> Result<()> {
     for (idx, edge) in edges.iter().take(3).enumerate() {
         info!(idx, ip = %edge.ip, port = edge.port, "dial attempt");
         let addr = SocketAddr::new(edge.ip, edge.port);
-        match tokio::time::timeout(
-            HANDSHAKE_TIMEOUT,
-            endpoint.connect(addr, EDGE_SNI)?,
-        )
-        .await
-        {
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, endpoint.connect(addr, EDGE_SNI)?).await {
             Ok(Ok(conn)) => {
                 info!("HANDSHAKE OK");
                 dump_connection(&conn);
@@ -156,7 +151,12 @@ fn build_client_config() -> Result<ClientConfig> {
             cf_added += 1;
         }
     }
-    info!(native, cf_added, total = roots.len(), "trust anchors loaded");
+    info!(
+        native,
+        cf_added,
+        total = roots.len(),
+        "trust anchors loaded"
+    );
 
     let mut tls = RustlsClientConfig::builder()
         .with_root_certificates(roots)
