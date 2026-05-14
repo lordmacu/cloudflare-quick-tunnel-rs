@@ -1,9 +1,22 @@
 # cloudflare-quick-tunnel
 
+[![crates.io](https://img.shields.io/crates/v/cloudflare-quick-tunnel.svg)](https://crates.io/crates/cloudflare-quick-tunnel)
+[![docs.rs](https://img.shields.io/docsrs/cloudflare-quick-tunnel)](https://docs.rs/cloudflare-quick-tunnel)
+[![CI](https://github.com/lordmacu/cloudflare-quick-tunnel-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lordmacu/cloudflare-quick-tunnel-rs/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/cloudflare-quick-tunnel.svg)](https://github.com/lordmacu/cloudflare-quick-tunnel-rs#license)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0)
+
 > Pure-Rust client for **Cloudflare quick tunnels**
 > (`https://*.trycloudflare.com`). Speaks QUIC + Cap'n Proto-RPC
 > against the `argotunnel` edge directly — no `cloudflared`
 > subprocess, no ~30 MB Go binary in your release tarball.
+
+Add to your project:
+
+```toml
+[dependencies]
+cloudflare-quick-tunnel = "0.3"
+```
 
 > Built as part of **[Nexo](https://github.com/lordmacu/nexo-rs)** — a
 > Rust multi-agent framework for building autonomous WhatsApp / Telegram /

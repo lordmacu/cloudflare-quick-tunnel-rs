@@ -4,6 +4,48 @@ All notable changes to this project will be documented here. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.3.0] — 2026-05-14
+
+### Added
+
+- **WebSocket Upgrade support.** `proxy_http` now runs the two
+  byte halves truly concurrently after the response head is
+  parsed, so 101 Switching Protocols connections flow indefinitely
+  in both directions until either peer closes. Previously the
+  bidi `join!` shape blocked on the request-body pump finishing
+  first, which never happens for WS.
+
+- **HA pool.** `QuickTunnelManager::with_ha_connections(n)`
+  (default 2, max 4). Spawns N independent reactor tasks, each
+  registering on a distinct `conn_index`. The edge load-balances
+  inbound requests across the pool, and a single POP outage
+  no longer triggers a ~5s downtime window — surviving legs
+  keep serving while the dropped one reconnects.
+
+- **TCP keep-alive pool against `127.0.0.1:<port>`.** New
+  `pool::Pool` (LIFO idle list with 30s TTL, 16-entry cap)
+  reduces per-stream socket-connect overhead. `proxy_http`
+  analyses request + response shape — only Content-Length-
+  bounded HTTP/1.1 requests with no Upgrade / chunked /
+  Connection: close go through the pooled framed-read path.
+  WebSocket Upgrades, Transfer-Encoding: chunked, and close-
+  bound responses fall back to the bidi-pump and the socket
+  is dropped at the end.
+
+### Changed
+
+- **MSRV bumped 1.78 → 1.85.** Two transitive deps
+  (`wiremock` 0.6.5, `idna_adapter` 1.2.2) require `edition2024`
+  which stabilised in Rust 1.85. The previous `wiremock = "=0.6.4"`
+  pin in dev-deps is removed; resolver picks the latest 0.6.x
+  again.
+
+- `QuickTunnelHandle::shutdown` now waits for **every** HA reactor
+  to drain + unregister, not just one.
+
+- `Drop` for `QuickTunnelHandle` uses `Notify::notify_waiters`
+  (one signal → N reactors) instead of a single oneshot.
+
 ## [0.2.0] — 2026-05-14
 
 ### Changed

@@ -45,6 +45,7 @@ pub mod api;
 pub mod edge;
 pub mod error;
 pub mod manager;
+pub mod pool;
 pub mod proxy;
 pub mod quic_dial;
 pub mod rpc;

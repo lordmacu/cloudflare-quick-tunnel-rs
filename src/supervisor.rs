@@ -25,6 +25,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
+use crate::pool::Pool;
 use crate::proxy::StreamCounters;
 
 #[derive(Debug, Default, Clone)]
@@ -71,6 +72,7 @@ pub async fn run(
     conn: quinn::Connection,
     local_port: u16,
     metrics: SupervisorMetrics,
+    pool: Arc<Pool>,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) -> SupervisorExit {
     info!(local_port, "tunnel supervisor running");
@@ -87,9 +89,12 @@ pub async fn run(
                     Ok((send, recv)) => {
                         metrics.streams_total.fetch_add(1, Ordering::Relaxed);
                         let counters = metrics.stream_counters();
+                        let pool = pool.clone();
                         tokio::spawn(async move {
-                            if let Err(e) =
-                                crate::proxy::handle_inbound_stream(local_port, send, recv, counters).await
+                            if let Err(e) = crate::proxy::handle_inbound_stream(
+                                local_port, send, recv, counters, pool,
+                            )
+                            .await
                             {
                                 warn!(error = %e, "stream proxy failed");
                             }

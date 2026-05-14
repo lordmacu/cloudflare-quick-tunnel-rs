@@ -5,16 +5,20 @@ members = ["spike"]
 
 [package]
 name        = "cloudflare-quick-tunnel"
-version     = "0.2.0"
+version     = "0.3.0"
 edition     = "2021"
 license     = "MIT OR Apache-2.0"
-description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly."
+description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly. HTTP/1.1 + WebSocket Upgrade, HA pool, TCP keep-alive."
 repository  = "https://github.com/lordmacu/cloudflare-quick-tunnel-rs"
 homepage    = "https://github.com/lordmacu/cloudflare-quick-tunnel-rs"
 readme      = "README.md"
 keywords    = ["cloudflare", "tunnel", "quic", "trycloudflare", "argotunnel"]
 categories  = ["network-programming"]
-rust-version = "1.78"
+# Bumped from 1.78 → 1.85 in 0.3.0 because two transitive deps
+# (wiremock 0.6.5, idna_adapter 1.2.2) now require edition2024
+# which stabilised in 1.85. Pinning transitives is fragile;
+# moving MSRV is cleaner. 1.85 is over a year old at this point.
+rust-version = "1.85"
 
 include = [
     "src/**/*",
@@ -65,10 +69,7 @@ tokio-util         = { version = "0.7", features = ["compat"] }
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["full"] }
-# wiremock 0.6.5 starts requiring edition2024 (Rust 1.85+). Pin
-# to the last 0.6.x that still works on our declared MSRV (1.78).
-# Bump when MSRV moves.
-wiremock           = "=0.6.4"
+wiremock           = "0.6"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow             = "1"
 
