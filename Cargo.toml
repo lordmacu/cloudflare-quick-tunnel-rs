@@ -65,7 +65,10 @@ tokio-util         = { version = "0.7", features = ["compat"] }
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["full"] }
-wiremock           = "0.6"
+# wiremock 0.6.5 starts requiring edition2024 (Rust 1.85+). Pin
+# to the last 0.6.x that still works on our declared MSRV (1.78).
+# Bump when MSRV moves.
+wiremock           = "=0.6.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow             = "1"
 
