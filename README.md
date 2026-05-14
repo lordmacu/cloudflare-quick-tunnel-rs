@@ -7,20 +7,29 @@
 
 ## Status
 
-🚧 **Pre-alpha.** Scaffold landed; end-to-end `QuickTunnelManager::start()`
-still being wired sub-phase by sub-phase. Module headers under `src/`
-carry per-step status.
+✅ **End-to-end working.** The full chain — POST `/tunnel` →
+edge discovery → QUIC dial → capnp-RPC `RegisterConnection` →
+inbound stream acceptor → HTTP/1.1 proxy → graceful unregister
+— is green under live tests. Reactor reconnect with exponential
+backoff handles edge-side drops. `streams_total` / `bytes_in` /
+`bytes_out` / `reconnects` are surfaced via `handle.metrics()`.
 
-The throwaway crate under `spike/` proves viability — `quinn` stock
-0.11 + `rustls` 0.23 (ring) completes a QUIC + TLS-1.3 handshake
-against the production `argotunnel` edge. Run it:
+Try it locally:
 
 ```bash
-cargo run -p cloudflare-quick-tunnel-spike
+# In one terminal: start any local HTTP server on 8080.
+python3 -m http.server 8080 &
+
+# In another: bring up the tunnel.
+cargo run --example serve -- 8080
+# →  Public URL: https://<sub>.trycloudflare.com
+# →  Edge POP:   bog01
 ```
 
-Findings + the three undocumented gotchas surfaced during the spike
-are in [`docs/spike-verdict.md`](docs/spike-verdict.md).
+The throwaway crate under `spike/` was used for the design
+spike — see [`docs/spike-verdict.md`](docs/spike-verdict.md) for
+the three undocumented edge gotchas it surfaced (ALPN, SNI, CF
+internal CAs).
 
 ## Why this crate exists
 
@@ -49,7 +58,7 @@ application stays a single self-contained Rust binary.
   and WARP use those.
 - ❌ WARP integration.
 
-## Quick start (when wired)
+## Quick start
 
 ```rust
 use cloudflare_quick_tunnel::QuickTunnelManager;
@@ -57,11 +66,31 @@ use cloudflare_quick_tunnel::QuickTunnelManager;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let handle = QuickTunnelManager::new(8080).start().await?;
-    println!("Public URL: {}", handle.url);
-    // ... keep handle alive while serving on 127.0.0.1:8080 ...
+    println!("Public URL: {}", handle.url);   // https://<sub>.trycloudflare.com
+    println!("Edge POP:   {}", handle.location); // e.g. bog01, atl01
+    // keep handle alive while serving on 127.0.0.1:8080 …
     handle.shutdown().await?;
     Ok(())
 }
+```
+
+The `examples/serve.rs` binary is the same code with a SIGINT
+shutdown loop + a periodic heartbeat.
+
+## Build prerequisites
+
+`build.rs` runs `capnpc` against the vendored schemas, so the
+host needs the `capnp` binary on `$PATH`:
+
+```sh
+# Debian / Ubuntu
+sudo apt install capnproto
+
+# macOS
+brew install capnp
+
+# Windows
+choco install capnproto
 ```
 
 ## License
