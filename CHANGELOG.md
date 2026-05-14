@@ -4,7 +4,30 @@ All notable changes to this project will be documented here. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
-## [0.1.0] — 2026-05-14
+## [0.2.0] — 2026-05-14
+
+### Changed
+
+- **No more `capnp` build-time dependency.** Cap'n Proto bindings
+  are now pre-generated under `src/proto_gen/` and shipped with
+  the crate. End users no longer need `capnproto` installed on
+  the host to `cargo build` — only the Rust toolchain.
+
+  - `build.rs` removed.
+  - `capnpc` dropped from build-dependencies.
+  - Maintainers regenerate via `scripts/regen-schemas.sh` after
+    bumping the vendored schemas.
+
+  This is a **build-system change**, not a behavioural one: the
+  generated bindings are byte-identical to what `0.1.0`'s
+  `build.rs` produced. Upgrade is a drop-in `cargo update`.
+
+### Removed
+
+- `0.1.0` was yanked from crates.io with reason
+  "build-time `capnp` dependency unnecessary; upgrade to 0.2.0".
+
+## [0.1.0] — 2026-05-14 (yanked)
 
 First public release. End-to-end working: provision a Cloudflare
 quick tunnel, dial the `argotunnel` edge over QUIC + Cap'n Proto-RPC,

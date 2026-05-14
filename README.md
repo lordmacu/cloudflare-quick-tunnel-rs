@@ -90,19 +90,11 @@ shutdown loop + a periodic heartbeat.
 
 ## Build prerequisites
 
-`build.rs` runs `capnpc` against the vendored schemas, so the
-host needs the `capnp` binary on `$PATH`:
-
-```sh
-# Debian / Ubuntu
-sudo apt install capnproto
-
-# macOS
-brew install capnp
-
-# Windows
-choco install capnproto
-```
+None — Cap'n Proto bindings are pre-generated under
+`src/proto_gen/` and shipped with the crate, so `cargo build`
+needs only the Rust toolchain. (Maintainers regenerating from
+a bumped schema run `scripts/regen-schemas.sh`, which is the
+only path that needs `capnp` installed.)
 
 ## License
 

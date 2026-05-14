@@ -5,7 +5,7 @@ members = ["spike"]
 
 [package]
 name        = "cloudflare-quick-tunnel"
-version     = "0.1.0"
+version     = "0.2.0"
 edition     = "2021"
 license     = "MIT OR Apache-2.0"
 description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly."
@@ -20,7 +20,6 @@ include = [
     "src/**/*",
     "schemas/**/*",
     "cf-edge-roots.pem",
-    "build.rs",
     "README.md",
     "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md",
@@ -63,9 +62,6 @@ capnp-futures      = "0.20"
 
 # Bridges tokio's AsyncRead/Write to futures-io which capnp-rpc speaks.
 tokio-util         = { version = "0.7", features = ["compat"] }
-
-[build-dependencies]
-capnpc = "0.20"
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["full"] }

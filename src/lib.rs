@@ -11,11 +11,15 @@
 //! the three undocumented edge gotchas (ALPN / SNI / trust roots)
 //! that the spike crate proved out against the production edge.
 
-// Cap'n Proto-generated bindings live at the crate root because
-// the generated code emits absolute `crate::<schema>_capnp::…`
-// paths between schemas (e.g. `tunnelrpc` references `metadata`
-// from `quic_metadata_protocol`). Hoisting them keeps the
-// generator output usable verbatim.
+// Cap'n Proto-generated bindings. Shipped pre-generated under
+// `src/proto_gen/` so consumers don't need the `capnp` toolchain
+// on their host to build this crate. Regenerate with
+// `scripts/regen-schemas.sh` after bumping the vendored schemas
+// in `schemas/`.
+//
+// They live at the crate root because the generator emits absolute
+// `crate::<schema>_capnp::…` paths between schemas — hoisting them
+// keeps the output usable verbatim.
 #[allow(
     clippy::all,
     unused,
@@ -24,7 +28,7 @@
     non_snake_case
 )]
 pub mod tunnelrpc_capnp {
-    include!(concat!(env!("OUT_DIR"), "/tunnelrpc_capnp.rs"));
+    include!("proto_gen/tunnelrpc_capnp.rs");
 }
 #[allow(
     clippy::all,
@@ -34,7 +38,7 @@ pub mod tunnelrpc_capnp {
     non_snake_case
 )]
 pub mod quic_metadata_protocol_capnp {
-    include!(concat!(env!("OUT_DIR"), "/quic_metadata_protocol_capnp.rs"));
+    include!("proto_gen/quic_metadata_protocol_capnp.rs");
 }
 
 pub mod api;
