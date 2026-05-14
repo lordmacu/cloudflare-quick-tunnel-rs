@@ -39,8 +39,14 @@ pub struct QuickTunnelHandle {
     pub account_tag: String,
     pub location: String,
     supervisor: Option<SupervisorHandle>,
+    control: Option<crate::rpc::ControlSession>,
     metrics_view: SupervisorMetrics,
 }
+
+/// Default budget for the `unregisterConnection` RPC on shutdown.
+/// Matches cloudflared's typical `GracePeriod` of 30s for clean
+/// disconnects.
+pub const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(30);
 
 impl QuickTunnelHandle {
     pub fn metrics(&self) -> TunnelMetrics {
@@ -52,10 +58,13 @@ impl QuickTunnelHandle {
         }
     }
 
-    /// Best-effort graceful shutdown: signals the supervisor task,
-    /// waits for it to drain accepted streams + close the QUIC
-    /// connection, and joins.
-    pub async fn shutdown(mut self) -> Result<(), TunnelError> {
+    /// Graceful shutdown: fires `unregisterConnection` on the
+    /// control stream (giving the edge `grace` to stop routing),
+    /// signals the supervisor, drains accepted streams, joins.
+    pub async fn shutdown_with(mut self, grace: Duration) -> Result<(), TunnelError> {
+        if let Some(control) = self.control.take() {
+            control.shutdown_graceful(grace).await;
+        }
         if let Some(sup) = self.supervisor.take() {
             let _ = sup.shutdown.send(());
             sup.join
@@ -64,6 +73,11 @@ impl QuickTunnelHandle {
         }
         Ok(())
     }
+
+    /// Shorthand for `shutdown_with(DEFAULT_GRACE_PERIOD)`.
+    pub async fn shutdown(self) -> Result<(), TunnelError> {
+        self.shutdown_with(DEFAULT_GRACE_PERIOD).await
+    }
 }
 
 impl Drop for QuickTunnelHandle {
@@ -71,10 +85,13 @@ impl Drop for QuickTunnelHandle {
         // Fire-and-forget close if the caller dropped without
         // awaiting shutdown(). The QUIC connection's own Drop will
         // close the link, but signalling the supervisor lets it
-        // exit its accept_bi loop cleanly.
+        // exit its accept_bi loop cleanly. ControlSession's Drop
+        // sends an Immediate shutdown — no async unregister.
         if let Some(sup) = self.supervisor.take() {
             let _ = sup.shutdown.send(());
         }
+        // self.control drops next via field order, firing the
+        // ShutdownCommand::Immediate path.
     }
 }
 
@@ -157,13 +174,12 @@ impl QuickTunnelManager {
         //    Connection on it lives.
         let sup = start_supervisor(conn, self.local_port);
         let metrics_view = sup.metrics.clone();
-        // Stash the endpoint + the control session in a parked
-        // task so both stay alive for the tunnel's lifetime. The
-        // endpoint owns the UDP socket; the control session keeps
-        // the capnp-RPC stream open so the edge doesn't unregister.
+        // Park the endpoint inside a detached task so its UDP
+        // socket survives past start(). Drop ties to handle
+        // lifetime: when the supervisor exits, this task exits
+        // (the conn close from supervisor cascades).
         tokio::spawn(async move {
             let _hold = endpoint;
-            let _control = control_session;
             let () = std::future::pending().await;
         });
 
@@ -173,6 +189,7 @@ impl QuickTunnelManager {
             account_tag: tunnel.account_tag,
             location: details.location,
             supervisor: Some(sup),
+            control: Some(control_session),
             metrics_view,
         })
     }

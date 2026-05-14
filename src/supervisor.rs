@@ -25,12 +25,22 @@ use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 use crate::error::TunnelError;
+use crate::proxy::StreamCounters;
 
 #[derive(Debug, Default, Clone)]
 pub struct SupervisorMetrics {
     pub streams_total: Arc<AtomicU64>,
     pub bytes_in: Arc<AtomicU64>,
     pub bytes_out: Arc<AtomicU64>,
+}
+
+impl SupervisorMetrics {
+    fn stream_counters(&self) -> StreamCounters {
+        StreamCounters {
+            bytes_in: self.bytes_in.clone(),
+            bytes_out: self.bytes_out.clone(),
+        }
+    }
 }
 
 impl SupervisorMetrics {
@@ -70,10 +80,11 @@ pub fn start_supervisor(conn: quinn::Connection, local_port: u16) -> SupervisorH
                     match accepted {
                         Ok((send, recv)) => {
                             metrics_owned.streams_total.fetch_add(1, Ordering::Relaxed);
+                            let counters = metrics_owned.stream_counters();
                             let local_port = local_port;
                             tokio::spawn(async move {
                                 if let Err(e) =
-                                    crate::proxy::handle_inbound_stream(local_port, send, recv).await
+                                    crate::proxy::handle_inbound_stream(local_port, send, recv, counters).await
                                 {
                                     warn!(error = %e, "stream proxy failed");
                                 }

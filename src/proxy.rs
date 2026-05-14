@@ -25,11 +25,24 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 use tracing::{debug, warn};
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use crate::error::TunnelError;
 use crate::stream::{
     self, ConnectRequest, ConnectionType, HTTP_HEADER_KEY, HTTP_HOST_KEY, HTTP_METHOD_KEY,
     HTTP_STATUS_KEY,
 };
+
+/// Byte counters the supervisor accumulates across all streams.
+/// Cheap atomics so the proxy task can update without coordination.
+#[derive(Debug, Default, Clone)]
+pub struct StreamCounters {
+    /// Bytes received from the edge (request bodies + ws frames).
+    pub bytes_in: Arc<AtomicU64>,
+    /// Bytes sent to the edge (response bodies + ws frames).
+    pub bytes_out: Arc<AtomicU64>,
+}
 
 /// How long we wait for the local TCP listener to accept the first
 /// byte. Quick tunnels are usually pointed at a process that just
@@ -49,6 +62,7 @@ pub async fn handle_inbound_stream(
     local_port: u16,
     send: quinn::SendStream,
     recv: quinn::RecvStream,
+    counters: StreamCounters,
 ) -> Result<(), TunnelError> {
     let (mut reader, mut writer) = stream::split(send, recv);
     let req = stream::read_connect_request(&mut reader).await?;
@@ -56,9 +70,11 @@ pub async fn handle_inbound_stream(
 
     match req.conn_type {
         ConnectionType::Http | ConnectionType::Websocket => {
-            proxy_http(local_port, req, reader, writer).await
+            proxy_http(local_port, req, reader, writer, counters).await
         }
-        ConnectionType::Tcp => proxy_tcp(local_port, &req, &mut reader, &mut writer).await,
+        ConnectionType::Tcp => {
+            proxy_tcp(local_port, &req, &mut reader, &mut writer, &counters).await
+        }
     }
 }
 
@@ -69,6 +85,7 @@ async fn proxy_http<R, W>(
     request: ConnectRequest,
     mut from_edge: R,
     mut to_edge: W,
+    counters: StreamCounters,
 ) -> Result<(), TunnelError>
 where
     R: futures::io::AsyncRead + Unpin,
@@ -106,8 +123,9 @@ where
     //    HTTP/1.1 in practice often interleaves — and even a tiny
     //    HEAD/GET wants the request shut to flush. `join!` drives
     //    both halves; the body pump terminates first on EOF.
+    let in_counter = counters.bytes_in.clone();
     let body_pump = async {
-        let _ = pump_futures_to_tokio(&mut from_edge, &mut tcp_write).await;
+        let _ = pump_futures_to_tokio_counted(&mut from_edge, &mut tcp_write, &in_counter).await;
         let _ = tcp_write.shutdown().await;
     };
     let head_read = read_http_response_head(&mut tcp_read);
@@ -133,12 +151,17 @@ where
             .write_all(&leftover)
             .await
             .map_err(|e| TunnelError::Internal(format!("write leftover body: {e}")))?;
+        counters
+            .bytes_out
+            .fetch_add(leftover.len() as u64, Ordering::Relaxed);
     }
 
     // 6. Pump response body TCP → QUIC. Continues until the origin
     //    closes its half — typical HTTP/1.1 with Content-Length or
     //    chunked encoding will trigger that.
-    pump_tokio_to_futures(&mut tcp_read, &mut to_edge).await.ok();
+    pump_tokio_to_futures_counted(&mut tcp_read, &mut to_edge, &counters.bytes_out)
+        .await
+        .ok();
 
     to_edge
         .close()
@@ -286,6 +309,7 @@ async fn proxy_tcp<R, W>(
     _request: &ConnectRequest,
     from_edge: &mut R,
     to_edge: &mut W,
+    counters: &StreamCounters,
 ) -> Result<(), TunnelError>
 where
     R: futures::io::AsyncRead + Unpin,
@@ -296,18 +320,22 @@ where
         .map_err(|e| TunnelError::Internal(format!("tcp connect: {e}")))?;
     let (mut r, mut w) = tcp.into_split();
 
-    // ACK ack: send empty ConnectResponse before bytes flow.
+    // ACK: send empty ConnectResponse before bytes flow.
     stream::write_connect_response(to_edge, "", &[]).await?;
 
-    let edge_to_local = pump_futures_to_tokio(from_edge, &mut w);
-    let local_to_edge = pump_tokio_to_futures(&mut r, to_edge);
+    let edge_to_local = pump_futures_to_tokio_counted(from_edge, &mut w, &counters.bytes_in);
+    let local_to_edge = pump_tokio_to_futures_counted(&mut r, to_edge, &counters.bytes_out);
     let _ = futures::future::join(edge_to_local, local_to_edge).await;
     Ok(())
 }
 
 // ── Cross-IO byte pumps ──────────────────────────────────────────────────────
 
-async fn pump_futures_to_tokio<R, W>(mut src: R, dst: &mut W) -> Result<(), TunnelError>
+async fn pump_futures_to_tokio_counted<R, W>(
+    mut src: R,
+    dst: &mut W,
+    counter: &AtomicU64,
+) -> Result<(), TunnelError>
 where
     R: futures::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -324,11 +352,16 @@ where
         dst.write_all(&buf[..n])
             .await
             .map_err(|e| TunnelError::Internal(format!("write: {e}")))?;
+        counter.fetch_add(n as u64, Ordering::Relaxed);
     }
     Ok(())
 }
 
-async fn pump_tokio_to_futures<R, W>(src: &mut R, dst: &mut W) -> Result<(), TunnelError>
+async fn pump_tokio_to_futures_counted<R, W>(
+    src: &mut R,
+    dst: &mut W,
+    counter: &AtomicU64,
+) -> Result<(), TunnelError>
 where
     R: tokio::io::AsyncRead + Unpin,
     W: futures::io::AsyncWrite + Unpin,
@@ -345,6 +378,7 @@ where
         dst.write_all(&buf[..n])
             .await
             .map_err(|e| TunnelError::Internal(format!("write: {e}")))?;
+        counter.fetch_add(n as u64, Ordering::Relaxed);
     }
     Ok(())
 }

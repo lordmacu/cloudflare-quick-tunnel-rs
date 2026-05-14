@@ -47,7 +47,7 @@ impl tunnelrpc_capnp::configuration_manager::Server for StubCloudflaredServer {}
 impl tunnelrpc_capnp::cloudflared_server::Server for StubCloudflaredServer {}
 use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::error::TunnelError;
@@ -126,20 +126,48 @@ pub struct RegistrationDetails {
 /// the edge then unregisters the tunnel and stops routing traffic.
 ///
 /// Construct via [`register_connection`]; hold across the tunnel's
-/// lifetime; drop on shutdown.
+/// lifetime; either call [`ControlSession::shutdown_graceful`] to
+/// fire an `unregisterConnection` RPC on the way out, or just drop
+/// for an immediate close.
 pub struct ControlSession {
-    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    shutdown: Option<tokio::sync::oneshot::Sender<ShutdownCommand>>,
+    done: Option<tokio::sync::oneshot::Receiver<()>>,
     _join: std::thread::JoinHandle<()>,
+}
+
+/// Command sent from `ControlSession::{drop, shutdown_graceful}` to
+/// the dedicated driver thread.
+enum ShutdownCommand {
+    /// Close immediately. No `unregisterConnection` round-trip.
+    Immediate,
+    /// Call `unregisterConnection` first, wait up to `Duration`
+    /// for the edge to ack, then close.
+    Graceful(std::time::Duration),
+}
+
+impl ControlSession {
+    /// Send `unregisterConnection` and wait up to `grace` for the
+    /// edge to ack before tearing down the control stream. Best-
+    /// effort: timeouts and transport errors are swallowed so that
+    /// shutdown can't fail.
+    pub async fn shutdown_graceful(mut self, grace: std::time::Duration) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(ShutdownCommand::Graceful(grace));
+        }
+        if let Some(rx) = self.done.take() {
+            let budget = grace + std::time::Duration::from_secs(2);
+            let _ = tokio::time::timeout(budget, rx).await;
+        }
+    }
 }
 
 impl Drop for ControlSession {
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown.take() {
-            let _ = tx.send(());
+            let _ = tx.send(ShutdownCommand::Immediate);
         }
-        // Don't wait for the thread to actually join — the edge
-        // doesn't require an explicit unregister; the dropped
-        // RPC system + closed stream is enough.
+        // Driver thread exits on its own; we don't join here to
+        // keep Drop non-blocking.
     }
 }
 
@@ -176,7 +204,8 @@ pub async fn register_connection(
     // control stream from its side.
     let (done_tx, done_rx) =
         tokio::sync::oneshot::channel::<Result<RegistrationDetails, TunnelError>>();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<ShutdownCommand>();
+    let (driver_done_tx, driver_done_rx) = tokio::sync::oneshot::channel::<()>();
 
     let auth_owned = auth.clone();
     let options_owned = options.clone();
@@ -238,6 +267,7 @@ pub async fn register_connection(
                 tokio::pin!(shutdown_rx);
                 let mut sent_done = false;
                 let mut done_tx = Some(done_tx);
+                let mut shutdown_kind: Option<ShutdownCommand> = None;
                 loop {
                     tokio::select! {
                         biased;
@@ -248,8 +278,10 @@ pub async fn register_connection(
                             }
                             sent_done = true;
                         }
-                        // 2. Caller asked us to shut down — drop everything.
-                        _ = &mut shutdown_rx => {
+                        // 2. Caller asked us to shut down — break to drain
+                        //    + (maybe) call unregister below.
+                        cmd = &mut shutdown_rx => {
+                            shutdown_kind = cmd.ok();
                             break;
                         }
                         // 3. RPC system died (edge dropped stream, etc).
@@ -265,9 +297,23 @@ pub async fn register_connection(
                         }
                     }
                 }
+
+                // Graceful unregister: fire `unregisterConnection`
+                // and wait up to grace for the edge to ack. This
+                // mirrors cloudflared's `GracefulShutdown` —
+                // it lets the edge stop routing requests to our
+                // POP before we tear the QUIC stream down.
+                if let Some(ShutdownCommand::Graceful(grace)) = shutdown_kind {
+                    if sent_done {
+                        let req = server.unregister_connection_request();
+                        let _ = tokio::time::timeout(grace, req.send().promise).await;
+                    }
+                }
+
                 // Explicitly drop the bootstrap so capnp-rpc closes
                 // the stream cleanly on the way out.
                 drop(server);
+                let _ = driver_done_tx.send(());
             });
         })
         .map_err(|e| TunnelError::Internal(format!("spawn rpc driver thread: {e}")))?;
@@ -283,6 +329,7 @@ pub async fn register_connection(
         details,
         ControlSession {
             shutdown: Some(shutdown_tx),
+            done: Some(driver_done_rx),
             _join: join,
         },
     ))

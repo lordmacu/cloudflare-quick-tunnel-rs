@@ -105,7 +105,10 @@ async fn live_end_to_end_http_through_tunnel() {
 
     let mut attempt = 0u32;
     let mut body_text = String::new();
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    // Edge routing for a fresh quick tunnel takes anywhere from
+    // ~20s to ~90s in practice. Give it a generous window so a
+    // slow POP doesn't fail the test for non-protocol reasons.
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
     while std::time::Instant::now() < deadline {
         attempt += 1;
         match client.get(&probe_url).send().await {
@@ -129,9 +132,13 @@ async fn live_end_to_end_http_through_tunnel() {
         "expected echoed path in body, got {body_text:?}"
     );
 
-    let (streams, _, _) = (handle.metrics().streams_total, 0, 0);
-    eprintln!("streams_total={streams}");
-    assert!(streams >= 1, "supervisor should have accounted ≥1 stream");
+    let metrics = handle.metrics();
+    eprintln!(
+        "streams_total={} bytes_in={} bytes_out={}",
+        metrics.streams_total, metrics.bytes_in, metrics.bytes_out
+    );
+    assert!(metrics.streams_total >= 1, "expected ≥1 stream");
+    assert!(metrics.bytes_out > 0, "expected non-zero bytes_out (response body)");
 
     handle.shutdown().await.expect("shutdown");
 }
