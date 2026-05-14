@@ -71,7 +71,10 @@ tokio-util         = { version = "0.7", features = ["compat"] }
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["full"] }
-wiremock           = "0.6"
+# wiremock 0.6.5 uses `if let chains` (Rust 1.88+ feature). Our
+# MSRV is 1.86; pin the last 0.6.x that doesn't use them. Dev-only
+# dep, so consumers don't see this constraint.
+wiremock           = "=0.6.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow             = "1"
 
