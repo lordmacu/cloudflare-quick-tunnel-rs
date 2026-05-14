@@ -5,6 +5,17 @@
 > against the `argotunnel` edge directly — no `cloudflared`
 > subprocess, no ~30 MB Go binary in your release tarball.
 
+> Built as part of **[Nexo](https://github.com/lordmacu/nexo-rs)** — a
+> Rust multi-agent framework for building autonomous WhatsApp / Telegram /
+> Email agents with a NATS event bus, pluggable LLMs (MiniMax, Claude,
+> OpenAI, DeepSeek), per-agent memory, MCP support, and a SaaS-grade
+> microapp framework. Nexo embeds this crate to expose its admin /
+> webhook / pairing endpoints over a public HTTPS URL with zero ops
+> overhead — and the result is a self-contained single binary that
+> runs the same way on a VPS, in Docker, in Termux, and (next) as a
+> Flutter Android FFI library. If that sounds useful, see the parent
+> project.
+
 ## Status
 
 ✅ **End-to-end working.** The full chain — POST `/tunnel` →
