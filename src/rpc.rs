@@ -24,6 +24,27 @@ use std::time::Duration;
 
 use capnp::capability::Promise;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+
+// ── Stub server-side bootstrap ────────────────────────────────────────────────
+//
+// cloudflared opens the control RPC as a bidirectional channel: it
+// calls `registerConnection` outbound AND serves a `CloudflaredServer`
+// implementation back so the edge can push config / open UDP sessions.
+//
+// We don't implement those server methods (HTTP-only scope), but we
+// still need to expose a bootstrap object — otherwise the edge's
+// liveness probe (which resolves the bootstrap as part of its keep-
+// alive) fails with `no bootstrap capability` and the edge marks
+// the tunnel offline (HTTP 530 to public requests).
+//
+// Each method returns `unimplemented` by default thanks to the
+// trait's default impl, so a marker struct is all we need.
+
+struct StubCloudflaredServer;
+
+impl tunnelrpc_capnp::session_manager::Server for StubCloudflaredServer {}
+impl tunnelrpc_capnp::configuration_manager::Server for StubCloudflaredServer {}
+impl tunnelrpc_capnp::cloudflared_server::Server for StubCloudflaredServer {}
 use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{debug, info, warn};
@@ -180,7 +201,12 @@ pub async fn register_connection(
                     rpc_twoparty_capnp::Side::Client,
                     Default::default(),
                 ));
-                let mut rpc_system = RpcSystem::new(network, None);
+                // Expose a stub CloudflaredServer so the edge has
+                // something to resolve when it probes our bootstrap
+                // for liveness. See the type's doc comment above.
+                let stub: tunnelrpc_capnp::cloudflared_server::Client =
+                    capnp_rpc::new_client(StubCloudflaredServer);
+                let mut rpc_system = RpcSystem::new(network, Some(stub.client));
                 let server: tunnelrpc_capnp::registration_server::Client =
                     rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
