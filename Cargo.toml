@@ -5,7 +5,7 @@ members = ["spike"]
 
 [package]
 name        = "cloudflare-quick-tunnel"
-version     = "0.1.0-dev"
+version     = "0.1.0"
 edition     = "2021"
 license     = "MIT OR Apache-2.0"
 description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly."
@@ -22,8 +22,10 @@ include = [
     "cf-edge-roots.pem",
     "build.rs",
     "README.md",
+    "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md",
-    "LICENSE-*",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
 ]
 
 [dependencies]
