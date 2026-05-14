@@ -5,7 +5,7 @@ members = ["spike"]
 
 [package]
 name        = "cloudflare-quick-tunnel"
-version     = "0.3.0"
+version     = "0.3.1"
 edition     = "2021"
 license     = "MIT OR Apache-2.0"
 description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly. HTTP/1.1 + WebSocket Upgrade, HA pool, TCP keep-alive."
@@ -14,11 +14,13 @@ homepage    = "https://github.com/lordmacu/cloudflare-quick-tunnel-rs"
 readme      = "README.md"
 keywords    = ["cloudflare", "tunnel", "quic", "trycloudflare", "argotunnel"]
 categories  = ["network-programming"]
-# Bumped from 1.78 → 1.85 in 0.3.0 because two transitive deps
-# (wiremock 0.6.5, idna_adapter 1.2.2) now require edition2024
-# which stabilised in 1.85. Pinning transitives is fragile;
-# moving MSRV is cleaner. 1.85 is over a year old at this point.
-rust-version = "1.85"
+# MSRV chase log:
+#   0.2 → 0.3: 1.78 → 1.85 (edition2024 on wiremock + idna_adapter)
+#   0.3 → 0.3.1: 1.85 → 1.86 (icu_* crates buried under url→idna→icu)
+# We don't pin the transitive icu / idna chain because url is
+# pulled by reqwest + hickory-resolver; bumping MSRV is cheaper
+# and more honest than the alternative.
+rust-version = "1.86"
 
 include = [
     "src/**/*",

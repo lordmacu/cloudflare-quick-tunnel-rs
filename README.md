@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/cloudflare-quick-tunnel)](https://docs.rs/cloudflare-quick-tunnel)
 [![CI](https://github.com/lordmacu/cloudflare-quick-tunnel-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lordmacu/cloudflare-quick-tunnel-rs/actions/workflows/ci.yml)
 [![license](https://img.shields.io/crates/l/cloudflare-quick-tunnel.svg)](https://github.com/lordmacu/cloudflare-quick-tunnel-rs#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0)
+[![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://blog.rust-lang.org/2025/04/03/Rust-1.86.0)
 
 > Pure-Rust client for **Cloudflare quick tunnels**
 > (`https://*.trycloudflare.com`). Speaks QUIC + Cap'n Proto-RPC

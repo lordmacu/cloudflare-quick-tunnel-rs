@@ -4,6 +4,16 @@ All notable changes to this project will be documented here. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.3.1] — 2026-05-14
+
+### Changed
+
+- **MSRV bumped 1.85 → 1.86.** `icu_*` 2.2.0 (transitive under
+  `url` → `idna` → `idna_adapter` 1.2.2) require Rust 1.86. We
+  don't pin the transitive — `url` is pulled by both `reqwest`
+  and `hickory-resolver` so the only realistic fix is to move
+  MSRV. 1.86 has been stable since April 2025.
+
 ## [0.3.0] — 2026-05-14
 
 ### Added
