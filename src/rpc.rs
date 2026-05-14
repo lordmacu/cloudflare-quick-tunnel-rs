@@ -69,10 +69,16 @@ impl ConnectionOptions {
     pub fn default_for_quick_tunnel(version: &str) -> Self {
         Self {
             client_id: *Uuid::new_v4().as_bytes(),
+            // Mirror cloudflared `features/features.go::defaultFeatures`
+            // exactly. Drift means the edge may refuse or downgrade
+            // the connection silently. `support_datagram_v3` is
+            // DEPRECATED upstream — kept out on purpose.
             features: vec![
+                "allow_remote_config".into(),
                 "serialized_headers".into(),
-                "ha-origin".into(),
-                "support_datagram_v3".into(),
+                "support_datagram_v2".into(),
+                "support_quic_eof".into(),
+                "management_logs".into(),
             ],
             version: version.to_string(),
             arch: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
@@ -93,91 +99,167 @@ pub struct RegistrationDetails {
     pub tunnel_is_remotely_managed: bool,
 }
 
-/// Set up a capnp-RPC client over the first bidi stream of `conn`
-/// and call `RegistrationServer.registerConnection`. Returns the
-/// edge's `ConnectionDetails` on success, or a `TunnelError` on
-/// transport / business failure.
+/// Owns the long-lived control-stream resources so the edge keeps
+/// the tunnel registered. Dropping this triggers the dedicated
+/// driver thread to wind down, which closes the control stream —
+/// the edge then unregisters the tunnel and stops routing traffic.
+///
+/// Construct via [`register_connection`]; hold across the tunnel's
+/// lifetime; drop on shutdown.
+pub struct ControlSession {
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    _join: std::thread::JoinHandle<()>,
+}
+
+impl Drop for ControlSession {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        // Don't wait for the thread to actually join — the edge
+        // doesn't require an explicit unregister; the dropped
+        // RPC system + closed stream is enough.
+    }
+}
+
+/// Set up a capnp-RPC client over the first bidi stream of `conn`,
+/// call `RegistrationServer.registerConnection`, and KEEP the
+/// stream + RPC system alive for the lifetime of the returned
+/// `ControlSession`. Returns the edge's `ConnectionDetails` plus
+/// the session handle.
 ///
 /// The QUIC connection MUST be freshly handshaked — opening more
 /// than one stream before this would break the edge's
-/// "first-stream-is-control" assumption.
+/// "first-stream-is-control" assumption (cloudflared
+/// `quic_connection.go::Serve` opens the control stream first
+/// thing, then the request streams come on top).
 pub async fn register_connection(
     conn: &quinn::Connection,
     auth: &TunnelAuth,
     tunnel_id: Uuid,
     conn_index: u8,
     options: &ConnectionOptions,
-) -> Result<RegistrationDetails, TunnelError> {
+) -> Result<(RegistrationDetails, ControlSession), TunnelError> {
     debug!(%tunnel_id, conn_index, "opening control stream");
     let (send, recv) = conn.open_bi().await.map_err(|e| {
         TunnelError::Register(format!("open_bi on control stream: {e}"))
     })?;
+    // capnp-rpc's `RpcSystem` is `!Send` (internal Rc<RefCell<_>>),
+    // so we can't drive it from a tokio task. Spawn a dedicated OS
+    // thread with its own current-thread tokio runtime + LocalSet
+    // to host the system. Communicate result via oneshot.
+    //
+    // The thread runs for the full lifetime of the tunnel — it
+    // returns only when the ControlSession is dropped, signalled
+    // through `shutdown_rx`, OR when the edge tears down the
+    // control stream from its side.
+    let (done_tx, done_rx) =
+        tokio::sync::oneshot::channel::<Result<RegistrationDetails, TunnelError>>();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // capnp-rpc speaks futures-io, not tokio-io. Bridge via
-    // tokio_util::compat. The reader needs Send + Unpin + 'static
-    // because RpcSystem internally spawns onto its own driver.
-    let reader = recv.compat();
-    let writer = send.compat_write();
-    // VatNetwork's third arg is OUR side of the twoparty link.
-    // We're the QUIC connection initiator (this whole crate is the
-    // client) → `Side::Client`. The edge is `Side::Server`, and that
-    // is the side whose bootstrap capability we request below.
-    let network = Box::new(twoparty::VatNetwork::new(
-        reader,
-        writer,
-        rpc_twoparty_capnp::Side::Client,
-        Default::default(),
-    ));
-    let mut rpc_system = RpcSystem::new(network, None);
-    // The schema has `interface TunnelServer extends (RegistrationServer)`.
-    // The edge's bootstrap object honours both, so we ask directly for the
-    // narrower `RegistrationServer` view — that's where
-    // `register_connection_request` lives on the generated client.
-    let server: tunnelrpc_capnp::registration_server::Client =
-        rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+    let auth_owned = auth.clone();
+    let options_owned = options.clone();
 
-    // Drive the RPC system alongside our single call. capnp-rpc's
-    // contract is that polling the system + polling the call future
-    // both have to make progress, hence the join. We don't care if
-    // the system future returns first (server dropped the stream);
-    // the call's error will be the actionable one.
-    let request = build_register_request(&server, auth, tunnel_id, conn_index, options)?;
+    let join = std::thread::Builder::new()
+        .name("cfqt-rpc-driver".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("rpc driver runtime");
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async move {
+                // Construct VatNetwork inside this thread because
+                // its internals are !Send (Rc<RefCell<…>>). We bridge
+                // the quinn streams to futures-io here too.
+                let reader = recv.compat();
+                let writer = send.compat_write();
+                let network = Box::new(twoparty::VatNetwork::new(
+                    reader,
+                    writer,
+                    rpc_twoparty_capnp::Side::Client,
+                    Default::default(),
+                ));
+                let mut rpc_system = RpcSystem::new(network, None);
+                let server: tunnelrpc_capnp::registration_server::Client =
+                    rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
-    let call = async {
-        let reply = request.send().promise.await.map_err(|e| {
-            TunnelError::Register(format!("register_connection RPC: {e}"))
-        })?;
-        let response_reader = reply.get().map_err(|e| {
-            TunnelError::Register(format!("response root: {e}"))
-        })?;
-        let result = response_reader.get_result().map_err(|e| {
-            TunnelError::Register(format!("response.result: {e}"))
-        })?;
-        decode_connection_response(result)
-    };
+                // Build + dispatch the register call.
+                let request =
+                    match build_register_request(&server, &auth_owned, tunnel_id, conn_index, &options_owned) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = done_tx.send(Err(e));
+                            return;
+                        }
+                    };
+                let response_promise = request.send().promise;
 
-    // Use timeout instead of select! to keep the system future alive
-    // for the duration of the call.
-    let system_fut = async move {
-        let _ = rpc_system.await;
-    };
+                let call = async {
+                    let reply = response_promise.await.map_err(|e| {
+                        TunnelError::Register(format!("register_connection RPC: {e}"))
+                    })?;
+                    let response_reader = reply.get().map_err(|e| {
+                        TunnelError::Register(format!("response root: {e}"))
+                    })?;
+                    let result = response_reader.get_result().map_err(|e| {
+                        TunnelError::Register(format!("response.result: {e}"))
+                    })?;
+                    decode_connection_response(result)
+                };
 
-    let outcome = tokio::select! {
-        biased;
-        res = call => res,
-        _ = system_fut => Err(TunnelError::Register(
-            "RPC system terminated before call completed".into(),
-        )),
-        _ = tokio::time::sleep(DEFAULT_RPC_TIMEOUT) => Err(TunnelError::Register(
-            format!("register_connection RPC timed out after {:?}", DEFAULT_RPC_TIMEOUT),
-        )),
-    };
+                tokio::pin!(call);
+                tokio::pin!(shutdown_rx);
+                let mut sent_done = false;
+                let mut done_tx = Some(done_tx);
+                loop {
+                    tokio::select! {
+                        biased;
+                        // 1. Register call completes — return result to caller.
+                        res = &mut call, if !sent_done => {
+                            if let Some(tx) = done_tx.take() {
+                                let _ = tx.send(res);
+                            }
+                            sent_done = true;
+                        }
+                        // 2. Caller asked us to shut down — drop everything.
+                        _ = &mut shutdown_rx => {
+                            break;
+                        }
+                        // 3. RPC system died (edge dropped stream, etc).
+                        _ = &mut rpc_system => {
+                            if !sent_done {
+                                if let Some(tx) = done_tx.take() {
+                                    let _ = tx.send(Err(TunnelError::Register(
+                                        "RPC system terminated before call completed".into(),
+                                    )));
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                // Explicitly drop the bootstrap so capnp-rpc closes
+                // the stream cleanly on the way out.
+                drop(server);
+            });
+        })
+        .map_err(|e| TunnelError::Internal(format!("spawn rpc driver thread: {e}")))?;
 
-    match &outcome {
-        Ok(d) => info!(uuid = %d.uuid, location = %d.location, "registered with edge"),
-        Err(e) => warn!(error = %e, "register_connection failed"),
-    }
-    outcome
+    let details = tokio::time::timeout(DEFAULT_RPC_TIMEOUT, done_rx)
+        .await
+        .map_err(|_| TunnelError::Register("register_connection RPC timed out".into()))?
+        .map_err(|_| TunnelError::Register("RPC driver dropped result channel".into()))??;
+
+    info!(uuid = %details.uuid, location = %details.location, "registered with edge");
+
+    Ok((
+        details,
+        ControlSession {
+            shutdown: Some(shutdown_tx),
+            _join: join,
+        },
+    ))
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

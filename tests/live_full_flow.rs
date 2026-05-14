@@ -44,7 +44,7 @@ async fn live_full_register_flow() {
     };
     let options = ConnectionOptions::default_for_quick_tunnel("cloudflare-quick-tunnel/0.1.0");
 
-    let details = register_connection(&conn, &auth, tunnel_id, 0, &options)
+    let (details, _control) = register_connection(&conn, &auth, tunnel_id, 0, &options)
         .await
         .expect("registerConnection");
     eprintln!(
