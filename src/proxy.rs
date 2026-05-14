@@ -110,10 +110,8 @@ fn analyse_request(req: &ConnectRequest) -> RequestShape {
             "content-length" => {
                 shape.content_length = v.parse().ok();
             }
-            "transfer-encoding" => {
-                if lval.contains("chunked") {
-                    shape.is_chunked = true;
-                }
+            "transfer-encoding" if lval.contains("chunked") => {
+                shape.is_chunked = true;
             }
             "upgrade" => {
                 shape.is_upgrade = true;
@@ -158,10 +156,8 @@ fn analyse_response(status: u16, headers: &[(String, String)]) -> ResponseShape 
         let lval = value.to_ascii_lowercase();
         match lname.as_str() {
             "content-length" => shape.content_length = value.parse().ok(),
-            "transfer-encoding" => {
-                if lval.contains("chunked") {
-                    shape.is_chunked = true;
-                }
+            "transfer-encoding" if lval.contains("chunked") => {
+                shape.is_chunked = true;
             }
             "connection" => {
                 if lval.contains("close") {
