@@ -3,19 +3,20 @@
 ## Working end-to-end
 
 The full chain — `POST /tunnel` → edge discovery → QUIC dial →
-capnp-RPC `RegisterConnection` → control-session keepalive →
+capnp-RPC `RegisterConnection` → stub-bootstrap-backed liveness →
 inbound-stream acceptor → HTTP/1.1 proxy to a local TCP listener
-— compiles green and has been proven on the wire. Run, then
-from a second terminal:
+→ graceful `unregisterConnection` on shutdown — is green under
+the gated live test.
 
 ```bash
-curl --resolve "<sub>.trycloudflare.com:443:104.16.230.132" \
-     https://<sub>.trycloudflare.com/probe
-# → "hello /probe"
+CFQT_LIVE_TESTS=1 cargo test --test live_serve_http -- --ignored --nocapture
+# Last green run:
+#   attempt 13: 200 OK body="hello /probe"
+#   streams_total=1 bytes_in=0 bytes_out=12
 ```
 
-That output IS the local hello server's response, served through
-the real `argotunnel` edge in `bog01`. Zero subprocess.
+`bytes_out == strlen("hello /probe")` confirms the counter pumps
+the proxy actually rides through `count`.
 
 ## Module status
 
@@ -24,58 +25,42 @@ the real `argotunnel` edge in `bog01`. Zero subprocess.
 | `api.rs`         | ✅     | POST /tunnel, exp-backoff retry, wiremock tests. |
 | `edge.rs`        | ✅     | SRV + DoT fallback, 1h cache, shuffle. |
 | `quic_dial.rs`   | ✅     | rustls + 3 CF CAs, ALPN argotunnel, SNI quic.cftunnel.com. |
-| `rpc.rs`         | ✅     | RegisterConnection succeeds; ControlSession keeps stream alive on dedicated thread. |
-| `stream.rs`      | ✅     | data-stream signature + version + capnp ConnectRequest/Response codecs. |
-| `proxy.rs`       | ✅     | HTTP rebuild + httparse response + bi-directional body pump. |
-| `supervisor.rs`  | ✅     | accept_bi loop + shutdown signal + stream counter metric. |
-| `manager.rs`     | ✅     | wires all of the above, returns a drop-in `QuickTunnelHandle`. |
+| `rpc.rs`         | ✅     | RegisterConnection + stub server bootstrap + graceful unregister. ControlSession lives on its own thread (capnp-rpc is !Send). |
+| `stream.rs`      | ✅     | Per-stream signature + version + capnp ConnectRequest/Response codecs. |
+| `proxy.rs`       | ✅     | HTTP rebuild + httparse response + counted bi-directional body pump. |
+| `supervisor.rs`  | ✅     | accept_bi loop + shutdown signal + streams_total + bytes_in/out via stream counters. |
+| `manager.rs`     | ✅     | Wires the full chain, returns a drop-in QuickTunnelHandle with shutdown / shutdown_with. |
 
 ## Known gaps
 
-1. **Intermittent 530 on fresh tunnels.** Cloudflare's edge
-   returns `530 ("tunnel unreachable")` on the first ~30-60s
-   for some fraction of newly-registered tunnels even after the
-   manual curl confirms the wire is fine. Working hypotheses,
-   in priority order:
+1. **No reconnect on edge-side close.** If the edge drops the
+   QUIC connection (POP restart, network blip), the supervisor
+   exits its `accept_bi` loop and the tunnel just dies. Fix
+   sketch: outer loop in `manager.rs` that re-runs the
+   dial → register → supervise chain with exp backoff, using
+   `replace_existing=true` on subsequent register calls so the
+   edge accepts the new connection for the same conn_index.
 
-   - We don't expose a `cloudflared_server` bootstrap. cloudflared
-     itself does — via `pogs.CloudflaredServer_ServerToClient`
-     wrapping its `SessionManager` + `ConfigurationManager` —
-     and the edge may probe that bootstrap as a liveness signal.
-     The fix is a stub `CloudflaredServer::Server` impl that
-     errors out on every method but at least replies "I'm here".
-   - Some additional feature flag the edge checks for routing
-     readiness. Current `default_for_quick_tunnel` features
-     match `cloudflared/features/features.go::defaultFeatures`
-     verbatim, but the upstream code adds more dynamically.
-   - Anycast warmup races. The published hostname's `cf-ray`
-     header tells us which colo serves the request; cross-colo
-     handoff to the registered POP can take seconds.
+2. **Single connection only.** cloudflared HA pools open multiple
+   conn_indexes (0..3) so a single edge POP outage doesn't break
+   the tunnel. Quick tunnels run with HA=1 by default, so this is
+   acceptable for the v0.1 scope but worth flagging.
 
-2. **No graceful unregister.** `ControlSession::drop` just closes
-   the RPC stream. cloudflared sends an explicit
-   `unregisterConnection` capnp call with a `gracePeriodNanoSec`
-   first. Without it the edge eventually 404s the tunnel after
-   noticing the QUIC connection went idle, which is fine for
-   quick tunnels but ugly.
+3. **No path observability beyond `bytes_in/out + streams_total`.**
+   No per-stream timing, no histogram of statuses, no logged
+   request lines. Easy to bolt on once a tracing schema settles.
 
-3. **No reconnect on edge-side close.** If the edge drops the
-   QUIC connection, the supervisor exits its `accept_bi` loop
-   and the tunnel just dies. cloudflared dial-loops with backoff;
-   we don't yet.
-
-4. **No telemetry surface beyond `streams_total`.** Bytes in/out
-   aren't counted in the proxy module — `SupervisorMetrics` has
-   the atomics but the proxy code never bumps them. Easy fix once
-   we settle on a metrics shape.
+4. **Status code 530 warmup.** Even with the stub bootstrap fix,
+   the edge can still return 530 for ~20–60s after a fresh
+   register while routing propagates across the POP. Reconnect
+   alone won't fix this; it's a CF-side timing characteristic of
+   anonymous quick tunnels.
 
 ## Verified live runs
 
-- `cargo test -p cloudflare-quick-tunnel --test live_full_flow -- --ignored`
-  with `CFQT_LIVE_TESTS=1`: registers, edge replies with a `bog01`
+- `live_full_flow`: registers, edge replies with a `bog01`
   connection UUID. Always green.
-- `cargo test -p cloudflare-quick-tunnel --test live_serve_http -- --ignored`
-  with `CFQT_LIVE_TESTS=1`: spawns local origin, brings up tunnel,
-  polls public URL. Intermittent — see gap #1.
-- Manual curl through a sustained tunnel: ✅ returns the local
-  server's body.
+- `live_serve_http`: spawns local origin, brings up tunnel, polls
+  public URL until echoed body returns. Green; takes ~40-75s
+  end-to-end depending on edge warmup.
+- Manual curl through a sustained tunnel: ✅.
