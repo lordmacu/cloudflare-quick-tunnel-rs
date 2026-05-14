@@ -1,0 +1,21 @@
+[package]
+name        = "cloudflare-quick-tunnel-spike"
+version     = "0.0.0"
+edition     = "2021"
+publish     = false
+description = "Throwaway GO/NO-GO spike — verifies that quinn stock can complete a TLS handshake against Cloudflare's argotunnel edge. Anchors the design decision in docs/spike-verdict.md. Will be deleted once src/quic_dial.rs lands."
+
+[[bin]]
+name = "cloudflare-quick-tunnel-spike"
+path = "src/main.rs"
+
+[dependencies]
+tokio              = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"] }
+anyhow             = "1"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hickory-resolver   = "0.24"
+rustls             = { version = "0.23", default-features = false, features = ["std", "ring", "tls12", "logging"] }
+rustls-native-certs = "0.7"
+rustls-pemfile     = "2"
+quinn              = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls", "ring"] }

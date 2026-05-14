@@ -1,0 +1,81 @@
+[workspace]
+members = ["spike"]
+
+# ── Top-level production crate ────────────────────────────────────────────────
+
+[package]
+name        = "cloudflare-quick-tunnel"
+version     = "0.1.0-dev"
+edition     = "2021"
+license     = "MIT OR Apache-2.0"
+description = "Pure-Rust client for Cloudflare quick tunnels (https://*.trycloudflare.com) — no cloudflared subprocess. Speaks QUIC + capnp-RPC to the argotunnel edge directly."
+repository  = "https://github.com/lordmacu/cloudflare-quick-tunnel-rs"
+homepage    = "https://github.com/lordmacu/cloudflare-quick-tunnel-rs"
+readme      = "README.md"
+keywords    = ["cloudflare", "tunnel", "quic", "trycloudflare", "argotunnel"]
+categories  = ["network-programming"]
+rust-version = "1.78"
+
+include = [
+    "src/**/*",
+    "schemas/**/*",
+    "cf-edge-roots.pem",
+    "build.rs",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE-*",
+]
+
+[dependencies]
+# Async + diagnostics
+tokio              = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "time", "sync"] }
+tracing            = "0.1"
+thiserror          = "1"
+anyhow             = "1"
+bytes              = "1"
+futures            = "0.3"
+
+# Data
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+base64             = "0.22"
+uuid               = { version = "1", features = ["v4", "serde"] }
+
+# HTTP — POST /tunnel
+reqwest            = { version = "0.12", default-features = false, features = ["json", "charset", "rustls-tls"] }
+
+# QUIC + TLS
+quinn              = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls", "ring"] }
+rustls             = { version = "0.23", default-features = false, features = ["std", "ring", "tls12", "logging"] }
+rustls-pemfile     = "2"
+rustls-native-certs = "0.7"
+
+# DNS (SRV + DoT fallback)
+hickory-resolver   = { version = "0.24", default-features = false, features = ["dns-over-rustls", "tokio-runtime"] }
+
+# Cap'n Proto RPC over QUIC streams
+capnp              = "0.20"
+capnp-rpc          = "0.20"
+capnp-futures      = "0.20"
+
+[build-dependencies]
+capnpc = "0.20"
+
+[dev-dependencies]
+tokio              = { version = "1", features = ["full"] }
+wiremock           = "0.6"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ── Profiles ──────────────────────────────────────────────────────────────────
+# Mirror the nexo-rs convention so consumers via path/git dep don't see
+# surprising drift.
+
+[profile.release]
+lto              = "thin"
+codegen-units    = 1
+strip            = "symbols"
+
+[profile.release-fast]
+inherits         = "release"
+lto              = false
+codegen-units    = 16
