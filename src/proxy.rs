@@ -127,6 +127,12 @@ fn analyse_request(req: &ConnectRequest) -> RequestShape {
             _ => {}
         }
     }
+    // The edge strips hop-by-hop headers and says "this is a
+    // WebSocket" in the stream type instead, so the type decides — see
+    // `build_request_head`.
+    if req.conn_type == ConnectionType::Websocket {
+        shape.is_upgrade = true;
+    }
     shape
 }
 
@@ -400,6 +406,29 @@ fn build_request_head(req: &ConnectRequest, keep_alive: bool) -> String {
             head.push_str(": ");
             head.push_str(v);
             head.push_str("\r\n");
+        }
+    }
+    // Put back the upgrade the edge took out. Cloudflare's edge
+    // strips `Connection` and `Upgrade` (hop-by-hop headers) and marks the
+    // stream `ConnectionType::Websocket` instead; cloudflared re-adds them
+    // before dialling the origin, and without them the origin sees a plain
+    // GET and answers it as one — a 404 or a page, never a 101.
+    if req.conn_type == ConnectionType::Websocket {
+        let has = |name: &str| {
+            req.metadata.iter().any(|(k, _)| {
+                k.strip_prefix(&format!("{HTTP_HEADER_KEY}:"))
+                    .is_some_and(|h| h.eq_ignore_ascii_case(name))
+            })
+        };
+        if !saw_connection {
+            head.push_str("Connection: Upgrade\r\n");
+            saw_connection = true;
+        }
+        if !has("upgrade") {
+            head.push_str("Upgrade: websocket\r\n");
+        }
+        if !has("sec-websocket-version") {
+            head.push_str("Sec-WebSocket-Version: 13\r\n");
         }
     }
     // Tell the local server whether to keep the socket alive.
@@ -694,6 +723,38 @@ mod tests {
         let s = analyse_request(&req);
         assert!(s.is_upgrade);
         assert!(!s.poolable());
+    }
+
+    /// What the edge actually sends for a WebSocket: the type, and no
+    /// `Upgrade`/`Connection` headers. The origin must still be asked to
+    /// upgrade, and the stream must take the bidi path.
+    #[test]
+    fn websocket_type_without_headers_is_still_an_upgrade() {
+        let req = ConnectRequest {
+            dest: "https://x/share?token=t".into(),
+            conn_type: ConnectionType::Websocket,
+            metadata: vec![
+                (HTTP_METHOD_KEY.into(), "GET".into()),
+                (HTTP_HOST_KEY.into(), "x".into()),
+                (
+                    format!("{HTTP_HEADER_KEY}:Sec-Websocket-Key"),
+                    "dGhlIHNhbXBsZQ==".into(),
+                ),
+            ],
+        };
+        let s = analyse_request(&req);
+        assert!(s.is_upgrade);
+        assert!(!s.poolable());
+        let head = build_request_head(&req, s.poolable());
+        assert!(
+            head.starts_with("GET /share?token=t HTTP/1.1\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("Connection: Upgrade\r\n"), "{head}");
+        assert!(head.contains("Upgrade: websocket\r\n"), "{head}");
+        assert!(head.contains("Sec-WebSocket-Version: 13\r\n"), "{head}");
+        assert!(!head.contains("keep-alive"), "{head}");
+        assert_eq!(head.matches("Connection:").count(), 1, "{head}");
     }
 
     #[test]

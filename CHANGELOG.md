@@ -4,6 +4,20 @@ All notable changes to this project will be documented here. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **WebSockets through a real tunnel.** Cloudflare's edge strips the
+  hop-by-hop `Upgrade` / `Connection` headers and marks the stream
+  `ConnectionType::Websocket` instead (cloudflared re-adds them before
+  dialling the origin). `analyse_request` only looked at the headers,
+  so the origin received a plain `GET` and answered it as one — a
+  WebSocket echo server returned 426 Upgrade Required through every
+  tunnel. A `Websocket`-typed stream is now always an upgrade, and the
+  request head gets `Connection: Upgrade`, `Upgrade: websocket` and
+  `Sec-WebSocket-Version: 13` when the edge left them out.
+
 ## [0.3.1] — 2026-05-14
 
 ### Changed
